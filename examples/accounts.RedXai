@@ -1,0 +1,23 @@
+{RedXaiStore[ID=1, Version="0.1"]=[
+  << Access points must appear before normal stored values.
+  {MailPlatformAccess[ID=5032]} = {"RedX - replace-this-development-key", ".js", ".py", ".cs", ".cpp", ".lua"},
+
+  << Long-lived RedX identity account data.
+  {Accounts[ID=10]} = ;[
+    {Account[ID=11]} = ;[
+      {AccountID[ID=12]} = "rx_user_01",
+      {Email[ID=13]} = "owner@redxaimail.com",
+      {PasswordHash[ID=14]} = "replace-with-a-real-password-hash",
+      {Verified[ID=15]} = TRUE,
+      {DisplayName[ID=16]} = "MainDirectory",
+      {RecoveryEmail[ID=17]} = NELL,
+      {StorageUsed[ID=18]} = 20%
+    ]:
+  ]:
+] Metadata={
+  Shared=FALSE,
+  ShareID=NELL,
+  OPFNames=NELL,
+  GA=FALSE,
+  GlobalID=NELL
+}};

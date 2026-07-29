@@ -1,0 +1,40 @@
+{
+  "name": "@redxdevelopment/redxaihm",
+  "version": "0.1.0-alpha.1",
+  "description": "RedXaiHM ID-centric long-term database language, parser, storage engine, CLI, and editor.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./parser": "./src/parser.js",
+    "./store": "./src/store.js"
+  },
+  "bin": {
+    "redxai": "./src/cli.js"
+  },
+  "files": [
+    "src",
+    "editor",
+    "assets",
+    "scripts",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/*.js && node --check editor/*.js",
+    "ci": "npm run check && npm test"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "keywords": [
+    "database",
+    "redxai",
+    "storage",
+    "parser",
+    "transactional"
+  ],
+  "license": "Apache-2.0"
+}
