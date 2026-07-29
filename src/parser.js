@@ -22,7 +22,7 @@ export class Parser {
   parseDatabase() {
     const start = this.consume('LBRACE', "Expected '{' to begin a database").start;
     const name = this.consume('IDENTIFIER', 'Expected RedXaiStore database header');
-    if (canonicalKey(name.value) !== 'redxaistore') this.error(name, 'Database header must be RedXaiStore');
+    if (name.value !== 'RedXaiStore') this.error(name, 'Database header must be exactly RedXaiStore');
 
     this.consume('LBRACKET', "Expected '[' after RedXaiStore");
     const header = this.parseHeaderProperties();
@@ -54,19 +54,15 @@ export class Parser {
     let version = '0.1';
     const extras = {};
 
-    if (this.check('NUMBER')) {
-      id = this.advance().value;
-    } else {
-      while (!this.check('RBRACKET') && !this.check('EOF')) {
-        const key = this.consume('IDENTIFIER', 'Expected database header property');
-        this.consume('EQUALS', `Expected '=' after ${key.value}`);
-        const value = this.parseScalarValue();
-        const normalized = canonicalKey(key.value);
-        if (normalized === 'id') id = scalarToPrimitive(value);
-        else if (normalized === 'version') version = String(scalarToPrimitive(value));
-        else extras[key.value] = value;
-        if (!this.match('COMMA')) break;
-      }
+    while (!this.check('RBRACKET') && !this.check('EOF')) {
+      const key = this.consume('IDENTIFIER', 'Expected database header property');
+      this.consume('EQUALS', `Expected '=' after ${key.value}`);
+      const value = this.parseScalarValue();
+      const normalized = canonicalKey(key.value);
+      if (normalized === 'id') id = scalarToPrimitive(value);
+      else if (normalized === 'version') version = String(scalarToPrimitive(value));
+      else extras[key.value] = value;
+      if (!this.match('COMMA')) break;
     }
 
     if (id === undefined) this.error(this.peek(), 'Database header requires ID=1');
@@ -77,11 +73,8 @@ export class Parser {
     const entries = [];
     while (!this.check(terminator) && !this.check('EOF')) {
       if (this.match('COMMA')) continue;
-      if (this.check('COMMENT')) {
-        entries.push(this.parseComment());
-      } else {
-        entries.push(this.parseAssignment());
-      }
+      if (this.check('COMMENT')) entries.push(this.parseComment());
+      else entries.push(this.parseAssignment());
       this.match('COMMA');
     }
     return entries;
