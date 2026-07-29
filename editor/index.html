@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RedXaiHM Editor</title>
+  <link rel="icon" href="/icon.svg">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <img src="/icon.svg" alt="Red X">
+    <div>
+      <h1>RedXaiHM Editor</h1>
+      <p id="file-name">Loading database…</p>
+    </div>
+    <div class="actions">
+      <button id="validate">Validate</button>
+      <button id="format">Format</button>
+      <button id="save" class="primary">Save</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="workspace">
+      <div class="bar">
+        <span>Official <strong>.RedXai</strong> source editor</span>
+        <span id="state" class="state">Loading</span>
+      </div>
+      <textarea id="source" spellcheck="false" aria-label="RedXai database source"></textarea>
+    </section>
+    <aside>
+      <h2>Validation</h2>
+      <div id="issues" class="issues"><p>No validation run yet.</p></div>
+      <div class="note">
+        <strong>Protected save path</strong>
+        <p>Every save is parsed, validated, backed up, and written atomically by the RedXaiHM engine.</p>
+      </div>
+    </aside>
+  </main>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
