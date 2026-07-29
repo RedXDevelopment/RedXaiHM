@@ -60,81 +60,90 @@ export class RedXaiDatabase {
   }
 
   setById(id, value) {
-    const node = this.requireById(id);
-    node.value = valueFrom(value);
-    this.commitMutation();
-    return node;
+    return this.atomicMutation(() => {
+      const node = this.requireById(id);
+      node.value = valueFrom(value);
+      return node;
+    });
   }
 
   renameById(id, name) {
     if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(name)) throw new TypeError('Invalid RedXai variable name');
-    const node = this.requireById(id);
-    node.name = name;
-    this.commitMutation();
-    return node;
+    return this.atomicMutation(() => {
+      const node = this.requireById(id);
+      node.name = name;
+      return node;
+    });
   }
 
   add(databaseIndex, name, value, id = null) {
-    const database = this.document.databases[databaseIndex];
-    if (!database) throw new RangeError(`Database index ${databaseIndex} does not exist`);
-    const actualId = id ?? this.nextId();
-    const node = createAssignment(name, value, actualId);
-    database.entries.push(node);
-    this.commitMutation();
-    return node;
+    return this.atomicMutation(() => {
+      const database = this.document.databases[databaseIndex];
+      if (!database) throw new RangeError(`Database index ${databaseIndex} does not exist`);
+      const actualId = id ?? this.nextId();
+      const node = createAssignment(name, value, actualId);
+      database.entries.push(node);
+      return node;
+    });
   }
 
   addToArray(arrayId, name, value, id = null) {
-    const owner = this.requireById(arrayId);
-    if (owner.value.valueType !== 'array') throw new TypeError(`ID ${arrayId} is not an array`);
-    const actualId = id ?? this.nextId();
-    const node = createAssignment(name, value, actualId);
-    owner.value.items.push(node);
-    this.commitMutation();
-    return node;
+    return this.atomicMutation(() => {
+      const owner = this.requireById(arrayId);
+      if (owner.value.valueType !== 'array') throw new TypeError(`ID ${arrayId} is not an array`);
+      const actualId = id ?? this.nextId();
+      const node = createAssignment(name, value, actualId);
+      owner.value.items.push(node);
+      return node;
+    });
   }
 
   deleteById(id) {
-    const record = this.idIndex.get(id);
-    if (!record) return false;
-    record.container.splice(record.index, 1);
-    this.commitMutation();
-    return true;
+    if (!this.idIndex.has(id)) return false;
+    return this.atomicMutation(() => {
+      const record = this.idIndex.get(id);
+      if (!record) return false;
+      record.container.splice(record.index, 1);
+      return true;
+    });
   }
 
   moveById(id, targetArrayId, index = null) {
-    const record = this.idIndex.get(id);
-    if (!record) throw new RangeError(`RedXai ID ${id} was not found`);
-    if (id === targetArrayId) throw new TypeError('A value cannot be moved inside itself');
-    const target = this.requireById(targetArrayId);
-    if (target.value.valueType !== 'array') throw new TypeError(`Target ID ${targetArrayId} is not an array`);
-    if (containsId(record.node, targetArrayId)) throw new TypeError('A value cannot be moved into one of its descendants');
+    return this.atomicMutation(() => {
+      const record = this.idIndex.get(id);
+      if (!record) throw new RangeError(`RedXai ID ${id} was not found`);
+      if (id === targetArrayId) throw new TypeError('A value cannot be moved inside itself');
+      const target = this.requireById(targetArrayId);
+      if (target.value.valueType !== 'array') throw new TypeError(`Target ID ${targetArrayId} is not an array`);
+      if (containsId(record.node, targetArrayId)) throw new TypeError('A value cannot be moved into one of its descendants');
 
-    const [node] = record.container.splice(record.index, 1);
-    const insertion = index == null ? target.value.items.length : Math.max(0, Math.min(index, target.value.items.length));
-    target.value.items.splice(insertion, 0, node);
-    this.commitMutation();
-    return node;
+      const [node] = record.container.splice(record.index, 1);
+      const insertion = index == null ? target.value.items.length : Math.max(0, Math.min(index, target.value.items.length));
+      target.value.items.splice(insertion, 0, node);
+      return node;
+    });
   }
 
   copyById(id, options = {}) {
-    const record = this.idIndex.get(id);
-    if (!record) throw new RangeError(`RedXai ID ${id} was not found`);
-    const clone = structuredClone(record.node);
-    const idMap = new Map();
-    let next = this.nextId();
-    remapIds(clone, (oldId, isRoot) => {
-      const replacement = isRoot && options.newId != null ? options.newId : next++;
-      if (oldId != null) idMap.set(oldId, replacement);
-      return replacement;
-    }, true);
-    if (options.newName) clone.name = options.newName;
+    return this.atomicMutation(() => {
+      const record = this.idIndex.get(id);
+      if (!record) throw new RangeError(`RedXai ID ${id} was not found`);
+      const clone = structuredClone(record.node);
+      const idMap = new Map();
+      let next = this.nextId();
+      remapIds(clone, (oldId, isRoot) => {
+        const replacement = isRoot && options.newId != null ? options.newId : next++;
+        if (oldId != null) idMap.set(oldId, replacement);
+        return replacement;
+      }, true);
+      remapInternalReferences(clone, idMap);
+      if (options.newName) clone.name = options.newName;
 
-    const target = options.targetArrayId == null ? record.container : this.requireArray(options.targetArrayId).value.items;
-    const insertion = options.index == null ? target.length : Math.max(0, Math.min(options.index, target.length));
-    target.splice(insertion, 0, clone);
-    this.commitMutation();
-    return { node: clone, idMap };
+      const target = options.targetArrayId == null ? record.container : this.requireArray(options.targetArrayId).value.items;
+      const insertion = options.index == null ? target.length : Math.max(0, Math.min(options.index, target.length));
+      target.splice(insertion, 0, clone);
+      return { node: clone, idMap };
+    });
   }
 
   requireArray(id) {
@@ -166,6 +175,20 @@ export class RedXaiDatabase {
     return structuredClone(this.document);
   }
 
+  atomicMutation(callback) {
+    const before = structuredClone(this.document);
+    try {
+      const result = callback();
+      if (this.options.validate) assertValid(this.document);
+      this.rebuildIndex();
+      return result;
+    } catch (error) {
+      this.document = before;
+      this.rebuildIndex();
+      throw error;
+    }
+  }
+
   commitMutation() {
     if (this.options.validate) assertValid(this.document);
     this.rebuildIndex();
@@ -187,4 +210,31 @@ function remapIds(node, allocator, isRoot = false) {
       });
     }
   }
+}
+
+function remapInternalReferences(node, idMap) {
+  walkNodeValues(node, (value) => {
+    if (value.valueType !== 'reference' || value.target?.type !== 'id') return;
+    const replacement = idMap.get(value.target.value);
+    if (replacement != null) value.target.value = replacement;
+  });
+}
+
+function walkNodeValues(node, visitor) {
+  if (node.kind !== 'assignment') return;
+  visitor(node.value);
+  if (node.value.valueType !== 'array' && node.value.valueType !== 'collection') return;
+  node.value.items.forEach((item) => {
+    if (item.kind === 'assignment') walkNodeValues(item, visitor);
+    else if (item.kind === 'value') walkValue(item, visitor);
+  });
+}
+
+function walkValue(value, visitor) {
+  visitor(value);
+  if (value.valueType !== 'array' && value.valueType !== 'collection') return;
+  value.items.forEach((item) => {
+    if (item.kind === 'assignment') walkNodeValues(item, visitor);
+    else if (item.kind === 'value') walkValue(item, visitor);
+  });
 }
