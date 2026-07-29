@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { open, readFile, rename, copyFile, mkdir, stat, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parse } from './parser.js';
@@ -46,36 +47,69 @@ export class RedXaiFileStore {
 
   async save(filePath, document) {
     assertExtension(filePath);
-    const warnings = assertValid(document);
-    const source = serialize(document, { indent: this.options.indent });
+    const prepared = this.prepareDocument(document);
     await mkdir(dirname(filePath), { recursive: true });
     const release = await this.acquireLock(filePath);
-    const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
     try {
-      if (this.options.backup && await exists(filePath)) await copyFile(filePath, `${filePath}.bak`);
-      const handle = await open(temporaryPath, 'wx', 0o600);
-      try {
-        await handle.writeFile(source, 'utf8');
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await rename(temporaryPath, filePath);
-      await syncDirectory(dirname(filePath));
-      return { filePath, bytes: Buffer.byteLength(source), warnings };
-    } catch (error) {
-      await unlink(temporaryPath).catch(() => {});
-      throw new RedXaiStorageError(`Failed to save ${filePath}`, { cause: error });
+      return await this.writeLocked(filePath, prepared);
     } finally {
       await release();
     }
   }
 
   async transaction(filePath, callback) {
-    const loaded = await this.load(filePath);
-    const result = await loaded.database.transaction(callback);
-    await this.save(filePath, loaded.database.document);
-    return result;
+    assertExtension(filePath);
+    await mkdir(dirname(filePath), { recursive: true });
+    const release = await this.acquireLock(filePath);
+    try {
+      // Loading while holding the same lock prevents the classic read-modify-write
+      // race where two writers both commit from an identical stale snapshot.
+      const loaded = await this.load(filePath);
+      const result = await loaded.database.transaction(callback);
+      const prepared = this.prepareDocument(loaded.database.document);
+      await this.writeLocked(filePath, prepared);
+      return result;
+    } finally {
+      await release();
+    }
+  }
+
+  prepareDocument(document) {
+    const warnings = assertValid(document);
+    const source = serialize(document, { indent: this.options.indent });
+    return { source, warnings };
+  }
+
+  async writeLocked(filePath, prepared) {
+    const temporaryPath = `${filePath}.tmp-${process.pid}-${randomUUID()}`;
+    const backupPath = `${filePath}.bak`;
+    const backupTemporaryPath = `${backupPath}.tmp-${process.pid}-${randomUUID()}`;
+    try {
+      if (this.options.backup && await exists(filePath)) {
+        await copyFile(filePath, backupTemporaryPath);
+        await syncFile(backupTemporaryPath);
+        await rename(backupTemporaryPath, backupPath);
+      }
+
+      const handle = await open(temporaryPath, 'wx', 0o600);
+      try {
+        await handle.writeFile(prepared.source, 'utf8');
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await rename(temporaryPath, filePath);
+      await syncDirectory(dirname(filePath));
+      return {
+        filePath,
+        bytes: Buffer.byteLength(prepared.source),
+        warnings: prepared.warnings,
+      };
+    } catch (error) {
+      await unlink(temporaryPath).catch(() => {});
+      await unlink(backupTemporaryPath).catch(() => {});
+      throw new RedXaiStorageError(`Failed to save ${filePath}`, { cause: error });
+    }
   }
 
   async acquireLock(filePath) {
@@ -84,8 +118,27 @@ export class RedXaiFileStore {
     while (true) {
       try {
         const handle = await open(lockPath, 'wx', 0o600);
-        await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }));
+        await handle.writeFile(JSON.stringify({
+          pid: process.pid,
+          createdAt: new Date().toISOString(),
+          token: randomUUID(),
+        }));
+        await handle.sync();
+
+        // Refresh the lock mtime while a valid writer is alive. A long transaction
+        // must not be mistaken for a crashed process merely because staleLockMs elapsed.
+        const heartbeatMs = Math.max(100, Math.floor(this.options.staleLockMs / 3));
+        const heartbeat = setInterval(() => {
+          const now = new Date();
+          handle.utimes(now, now).catch(() => {});
+        }, heartbeatMs);
+        heartbeat.unref?.();
+
+        let released = false;
         return async () => {
+          if (released) return;
+          released = true;
+          clearInterval(heartbeat);
           await handle.close().catch(() => {});
           await unlink(lockPath).catch(() => {});
         };
@@ -129,12 +182,21 @@ async function isStale(lockPath, staleMs) {
   }
 }
 
+async function syncFile(filePath) {
+  const handle = await open(filePath, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 async function syncDirectory(directory) {
   try {
     const handle = await open(directory, 'r');
     try { await handle.sync(); } finally { await handle.close(); }
   } catch {
-    // Some platforms do not support fsync on directories. The file itself is already synced.
+    // Some platforms do not support fsync on directories. The files themselves are synced.
   }
 }
 
