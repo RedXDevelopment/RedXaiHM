@@ -15,11 +15,16 @@ function fresh() {
   return new RedXaiDatabase(parse(referencedSource));
 }
 
+function validationIssue(code, messagePart) {
+  return (error) => Array.isArray(error?.issues)
+    && error.issues.some((entry) => entry.code === code && entry.message.includes(messagePart));
+}
+
 test('failed duplicate-ID add restores the exact document and indexes', () => {
   const db = fresh();
   const before = serialize(db.snapshot());
 
-  assert.throws(() => db.add(0, 'Duplicate', 99, 3), /Duplicate ID 3/);
+  assert.throws(() => db.add(0, 'Duplicate', 99, 3), validationIssue('RXH113', 'Duplicate ID 3'));
 
   assert.equal(serialize(db.snapshot()), before);
   assert.equal(db.getById(3).name, 'Child');
@@ -31,7 +36,7 @@ test('deleting a referenced value fails atomically and restores it', () => {
   const db = fresh();
   const before = serialize(db.snapshot());
 
-  assert.throws(() => db.deleteById(3), /Reference target ID 3 does not exist/);
+  assert.throws(() => db.deleteById(3), validationIssue('RXH150', 'Reference target ID 3'));
 
   assert.equal(serialize(db.snapshot()), before);
   assert.equal(db.requireById(3).value.value, 'value');
@@ -42,7 +47,10 @@ test('failed copy with a duplicate explicit root ID leaves no partial subtree', 
   const db = fresh();
   const before = serialize(db.snapshot());
 
-  assert.throws(() => db.copyById(2, { newId: 7, newName: 'BadCopy' }), /Duplicate ID 7/);
+  assert.throws(
+    () => db.copyById(2, { newId: 7, newName: 'BadCopy' }),
+    validationIssue('RXH113', 'Duplicate ID 7'),
+  );
 
   assert.equal(serialize(db.snapshot()), before);
   assert.equal(db.getByName('badcopy').length, 0);
@@ -94,7 +102,10 @@ test('failed mutation after a successful mutation restores the latest valid stat
   db.setById(7, 42);
   const committed = serialize(db.snapshot());
 
-  assert.throws(() => db.addToArray(2, 'DuplicateChild', false, 3), /Duplicate ID 3/);
+  assert.throws(
+    () => db.addToArray(2, 'DuplicateChild', false, 3),
+    validationIssue('RXH113', 'Duplicate ID 3'),
+  );
 
   assert.equal(serialize(db.snapshot()), committed);
   assert.equal(db.requireById(7).value.value, 42);
