@@ -5,10 +5,41 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-if (-not (Test-Path $IconPath)) {
-  $encoded = Get-Content "$PSScriptRoot\..\assets\redxai-file-icon.ico.b64" -Raw
-  [IO.File]::WriteAllBytes($IconPath, [Convert]::FromBase64String($encoded.Trim()))
+
+function New-RedXIcon([string]$Destination) {
+  Add-Type -AssemblyName System.Drawing
+  $bitmap = New-Object System.Drawing.Bitmap 256, 256
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $graphics.Clear([System.Drawing.Color]::Transparent)
+  $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+    (New-Object System.Drawing.Rectangle 0, 0, 256, 256),
+    ([System.Drawing.Color]::FromArgb(255, 255, 23, 79)),
+    ([System.Drawing.Color]::FromArgb(255, 112, 0, 31)),
+    45
+  )
+  $pen = New-Object System.Drawing.Pen $brush, 48
+  $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+  $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+  $graphics.DrawLine($pen, 48, 48, 208, 208)
+  $graphics.DrawLine($pen, 208, 48, 48, 208)
+  $iconHandle = $bitmap.GetHicon()
+  $icon = [System.Drawing.Icon]::FromHandle($iconHandle).Clone()
+  $stream = [IO.File]::Create($Destination)
+  try { $icon.Save($stream) } finally {
+    $stream.Dispose()
+    $icon.Dispose()
+    $pen.Dispose()
+    $brush.Dispose()
+    $graphics.Dispose()
+    $bitmap.Dispose()
+  }
 }
+
+if (-not (Test-Path $IconPath)) {
+  New-RedXIcon -Destination $IconPath
+}
+
 $IconPath = (Resolve-Path $IconPath).Path
 $classes = "HKCU:\Software\Classes"
 New-Item -Path "$classes\.RedXai" -Force | Out-Null
